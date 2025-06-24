@@ -1,56 +1,53 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Use CORS for frontend access
+const UPSTASH_REST_URL = process.env.UPSTASH_REST_URL;
+const UPSTASH_REST_TOKEN = process.env.UPSTASH_REST_TOKEN;
+
 app.use(cors());
 
-// Path to visitors.json (ensure this is a valid file path)
-const visitorsFile = path.join(__dirname, 'visitors.json');
-
-// Initialize file if it doesn't exist
-if (!fs.existsSync(visitorsFile)) {
-  fs.writeFileSync(visitorsFile, '{}');
-}
-
-// Helper: Load visitor IPs
-const loadVisitors = () => {
-  try {
-    const rawData = fs.readFileSync(visitorsFile, 'utf-8');
-    return JSON.parse(rawData);
-  } catch (err) {
-    return {};
-  }
-};
-
-// Helper: Save visitor IPs
-const saveVisitors = (visitors) => {
-  fs.writeFileSync(visitorsFile, JSON.stringify(visitors));
-};
-
-// Route: Track visitors
-app.get('/track', (req, res) => {
-  const visitors = loadVisitors();
-
+app.get('/track', async (req, res) => {
   const ip =
     req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-    req.connection.remoteAddress ||
     req.socket.remoteAddress ||
-    req.ip;
+    req.connection.remoteAddress;
 
-  if (!visitors[ip]) {
-    visitors[ip] = true;
-    saveVisitors(visitors);
+  try {
+    // Check if IP already exists in Redis
+    const check = await axios.get(`${UPSTASH_REST_URL}/get/${ip}`, {
+      headers: { Authorization: UPSTASH_REST_TOKEN },
+    });
+
+    if (!check.data.result) {
+      // If IP not found, add it
+      await axios.post(`${UPSTASH_REST_URL}/set/${ip}/1`, null, {
+        headers: { Authorization: UPSTASH_REST_TOKEN },
+      });
+
+      // Increment totalVisitors counter
+      await axios.post(`${UPSTASH_REST_URL}/incr/totalVisitors`, null, {
+        headers: { Authorization: UPSTASH_REST_TOKEN },
+      });
+    }
+
+    // Get total visitor count
+    const count = await axios.get(`${UPSTASH_REST_URL}/get/totalVisitors`, {
+      headers: { Authorization: UPSTASH_REST_TOKEN },
+    });
+
+    res.json({ totalVisitors: count.data.result || 1 });
+  } catch (err) {
+    console.error('Error tracking visitor:', err.message);
+    res.status(500).json({ error: 'Failed to track visitor' });
   }
-
-  res.json({ totalVisitors: Object.keys(visitors).length });
 });
 
-// Start server
 app.listen(PORT, () => {
-  console.log(`Visitor tracker is running at http://localhost:${PORT}`);
+  console.log(`Redis visitor tracker running at http://localhost:${PORT}`);
 });
