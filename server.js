@@ -1,48 +1,56 @@
 const express = require('express');
+const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const cors = require('cors');
 
 const app = express();
-const PORT = 3000;
-const VISITORS_FILE = path.join(__dirname, 'visitors.json');
+const PORT = process.env.PORT || 3000;
 
+// Use CORS for frontend access
 app.use(cors());
 
-// Load or initialize visitor data
-function loadVisitorData() {
-    if (!fs.existsSync(VISITORS_FILE)) {
-        fs.writeFileSync(VISITORS_FILE, JSON.stringify({ ips: [], count: 0 }, null, 2));
-    }
-    return JSON.parse(fs.readFileSync(VISITORS_FILE));
+// Path to visitors.json (ensure this is a valid file path)
+const visitorsFile = path.join(__dirname, 'visitors.json');
+
+// Initialize file if it doesn't exist
+if (!fs.existsSync(visitorsFile)) {
+  fs.writeFileSync(visitorsFile, '{}');
 }
 
-function saveVisitorData(data) {
-    fs.writeFileSync(VISITORS_FILE, JSON.stringify(data, null, 2));
-}
+// Helper: Load visitor IPs
+const loadVisitors = () => {
+  try {
+    const rawData = fs.readFileSync(visitorsFile, 'utf-8');
+    return JSON.parse(rawData);
+  } catch (err) {
+    return {};
+  }
+};
 
-// Get IP address from request
-function getClientIP(req) {
-    return req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
-}
+// Helper: Save visitor IPs
+const saveVisitors = (visitors) => {
+  fs.writeFileSync(visitorsFile, JSON.stringify(visitors));
+};
 
-// Endpoint to track unique visitors
+// Route: Track visitors
 app.get('/track', (req, res) => {
-    const ip = getClientIP(req);
-    const data = loadVisitorData();
+  const visitors = loadVisitors();
 
-    if (!data.ips.includes(ip)) {
-        data.ips.push(ip);
-        data.count += 1;
-        saveVisitorData(data);
-        console.log(`New visitor: ${ip}`);
-    } else {
-        console.log(`Returning visitor: ${ip}`);
-    }
+  const ip =
+    req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.connection.remoteAddress ||
+    req.socket.remoteAddress ||
+    req.ip;
 
-    res.json({ totalVisitors: data.count });
+  if (!visitors[ip]) {
+    visitors[ip] = true;
+    saveVisitors(visitors);
+  }
+
+  res.json({ totalVisitors: Object.keys(visitors).length });
 });
 
+// Start server
 app.listen(PORT, () => {
-    console.log(`Visitor Tracker running on http://localhost:${PORT}`);
+  console.log(`Visitor tracker is running at http://localhost:${PORT}`);
 });
