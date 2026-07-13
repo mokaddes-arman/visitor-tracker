@@ -1,7 +1,6 @@
+# Visitor Tracker API (Node.js + Turso SQLite)
 
-# Visitor Tracker API (Node.js + Redis)
-
-This is a backend service that tracks **unique visitor counts** based on IP addresses, using [Upstash Redis](https://upstash.com) as the backend store. Designed to work with static sites like GitHub Pages.
+This is a backend service that tracks **unique visitor counts** based on IP addresses, using [Turso](https://turso.tech) (SQLite) as the backend database. Designed to work with static sites like GitHub Pages.
 
 Example Frontend: [mokaddes.github.io](https://mokaddes.github.io)
 
@@ -10,8 +9,7 @@ Example Frontend: [mokaddes.github.io](https://mokaddes.github.io)
 ## Technologies Used
 
 - Node.js + Express
-- Upstash Redis (REST API)
-- Axios (for Redis requests)
+- Turso SQLite (Cloud Database)
 - CORS
 - Render (deployment)
 
@@ -22,33 +20,94 @@ Example Frontend: [mokaddes.github.io](https://mokaddes.github.io)
 - When someone visits the portfolio site, the frontend sends a request to `/track`
 - The server checks the IP address using `x-forwarded-for`
 - If it's a new IP, it:
-  - Adds the IP to Redis
-  - Increments the `totalVisitors` key 
+  - Stores the IP in the `visitors` table
+  - Increments the `totalVisitors` counter
 - The updated count is returned and shown on the site
 
 ---
+
 ## Setup Instructions (Local)
 
 1. Clone the repo
-2. Install dependencies: npm install
-3. Create a .env file:
-   UPSTASH_REST_URL=https://your-db.upstash.io
-   UPSTASH_REST_TOKEN=Bearer your_token_here
+   ```bash
+   git clone https://github.com/mokaddes-arman/visitor-tracker.git
+   cd visitor-tracker
+   ```
+
+2. Install dependencies
+   ```bash
+   npm install
+   ```
+
+3. Create a `.env` file with your Turso credentials:
+   ```env
+   TURSO_DATABASE_URL=libsql://your-database-url
+   TURSO_AUTH_TOKEN=your_auth_token_here
+   PORT=3000
+   ```
+
+4. Start the server
+   ```bash
+   npm start
+   ```
+
+The server will initialize the database tables on startup and run on `http://localhost:3000`
+
+---
+
+## API Endpoints
+
+### `GET /track`
+Tracks a visitor and returns the total visitor count.
+
+**Response:**
+```json
+{
+  "totalVisitors": 42
+}
+```
+
+---
 
 ## Deployment Instructions (Render)
 
-    Create a new Web Service on https://render.com
+1. Create a new Web Service on [https://render.com](https://render.com)
 
-    Connect to this repo
+2. Connect to this repository
 
-    Set environment variables in the dashboard:
+3. Set environment variables in the dashboard:
+   - `TURSO_DATABASE_URL` - Your Turso database URL
+   - `TURSO_AUTH_TOKEN` - Your Turso auth token
 
-        UPSTASH_REST_URL
+4. Use these settings:
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
 
-        UPSTASH_REST_TOKEN
+5. Deploy and your visitor tracker will be live!
 
-    Use these settings:
+---
 
-        Build Command: npm install
+## Database Schema
 
-        Start Command: node server.js
+### `visitors` table
+Stores unique visitor IP addresses:
+```sql
+CREATE TABLE visitors (
+  ip TEXT PRIMARY KEY
+)
+```
+
+### `counters` table
+Stores visitor count metrics:
+```sql
+CREATE TABLE counters (
+  name TEXT PRIMARY KEY,
+  value INTEGER NOT NULL DEFAULT 0
+)
+```
+
+---
+
+## License
+
+ISC
