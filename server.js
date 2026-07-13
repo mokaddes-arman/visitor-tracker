@@ -45,7 +45,6 @@ app.get('/track', async (req, res) => {
     });
 
     if (existing.rows.length === 0) {
-      // New visitor: record IP and bump the counter
       await turso.execute({
         sql: 'INSERT INTO visitors (ip) VALUES (?)',
         args: [ip],
@@ -60,11 +59,33 @@ app.get('/track', async (req, res) => {
     `);
     const totalVisitors = result.rows[0]?.value ?? 1;
 
+    res.setHeader('Content-Type', 'application/json');
     res.json({ totalVisitors });
   } catch (err) {
     console.error('Error tracking visitor:', err.message);
+    res.status(500).setHeader('Content-Type', 'application/json');
     res.status(500).json({ error: 'Failed to track visitor' });
   }
+});
+
+// Friendly root route (avoids Express's default "Cannot GET /" text)
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json({ status: 'Visitor tracker is running. Use /track to log a visit.' });
+});
+
+// Catch-all 404 — keeps responses small instead of Express's default HTML 404 page
+app.use((req, res) => {
+  res.status(404).setHeader('Content-Type', 'application/json');
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Global error handler — catches anything unhandled and returns compact JSON
+// instead of Express's default HTML stack-trace page
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  res.status(500).setHeader('Content-Type', 'application/json');
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 initDb()
