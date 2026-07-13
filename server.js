@@ -1,16 +1,36 @@
 require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const { createClient } = require('@libsql/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const UPSTASH_REST_URL = process.env.UPSTASH_REST_URL;
-const UPSTASH_REST_TOKEN = process.env.UPSTASH_REST_TOKEN;
+const turso = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
 app.use(cors());
+
+// Run once on startup to make sure tables exist
+async function initDb() {
+  await turso.execute(`
+    CREATE TABLE IF NOT EXISTS visitors (
+      ip TEXT PRIMARY KEY
+    )
+  `);
+  await turso.execute(`
+    CREATE TABLE IF NOT EXISTS counters (
+      name TEXT PRIMARY KEY,
+      value INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await turso.execute(`
+    INSERT INTO counters (name, value) VALUES ('totalVisitors', 0)
+    ON CONFLICT(name) DO NOTHING
+  `);
+}
 
 app.get('/track', async (req, res) => {
   const ip =
@@ -19,35 +39,41 @@ app.get('/track', async (req, res) => {
     req.connection.remoteAddress;
 
   try {
-    // Check if IP already exists in Redis
-    const check = await axios.get(`${UPSTASH_REST_URL}/get/${ip}`, {
-      headers: { Authorization: UPSTASH_REST_TOKEN },
+    const existing = await turso.execute({
+      sql: 'SELECT ip FROM visitors WHERE ip = ?',
+      args: [ip],
     });
 
-    if (!check.data.result) {
-      // If IP not found, add it
-      await axios.post(`${UPSTASH_REST_URL}/set/${ip}/1`, null, {
-        headers: { Authorization: UPSTASH_REST_TOKEN },
+    if (existing.rows.length === 0) {
+      // New visitor: record IP and bump the counter
+      await turso.execute({
+        sql: 'INSERT INTO visitors (ip) VALUES (?)',
+        args: [ip],
       });
-
-      // Increment totalVisitors counter
-      await axios.post(`${UPSTASH_REST_URL}/incr/totalVisitors`, null, {
-        headers: { Authorization: UPSTASH_REST_TOKEN },
-      });
+      await turso.execute(`
+        UPDATE counters SET value = value + 1 WHERE name = 'totalVisitors'
+      `);
     }
 
-    // Get total visitor count
-    const count = await axios.get(`${UPSTASH_REST_URL}/get/totalVisitors`, {
-      headers: { Authorization: UPSTASH_REST_TOKEN },
-    });
+    const result = await turso.execute(`
+      SELECT value FROM counters WHERE name = 'totalVisitors'
+    `);
+    const totalVisitors = result.rows[0]?.value ?? 1;
 
-    res.json({ totalVisitors: count.data.result || 1 });
+    res.json({ totalVisitors });
   } catch (err) {
     console.error('Error tracking visitor:', err.message);
     res.status(500).json({ error: 'Failed to track visitor' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Redis visitor tracker running at http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Visitor tracker running at http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize database:', err.message);
+    process.exit(1);
+  });
